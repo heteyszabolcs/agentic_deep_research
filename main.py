@@ -1,4 +1,4 @@
-from deep_research.graph import agent_graph
+from deep_researcher.graph import agent_graph
 from IPython.display import Image, display
 import uuid
 import os
@@ -20,7 +20,7 @@ def main():
     }
 
     os.makedirs("logs", exist_ok=True)
-    os.makedirs("report", exist_ok=True)
+    os.makedirs("reports", exist_ok=True)
 
     for event in agent_graph.stream(
         {"topic": TOPIC, "outline": OUTLINE},

@@ -11,7 +11,7 @@ from langchain_ollama import ChatOllama
 import os
 from dotenv import load_dotenv
 
-load_dotenv("deep-research\\.env")
+load_dotenv()
 
 def init_llm(
         provider: Literal["openai", "anthropic", "google", "ollama"],
