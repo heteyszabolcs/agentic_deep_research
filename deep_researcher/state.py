@@ -4,7 +4,6 @@ import operator
 from typing import TypedDict
 from .struct import Section, Feedback, Query, SearchResults
 
-
 class AgentState(TypedDict):
     topic: str
     outline: str
@@ -23,6 +22,7 @@ class ResearchState(TypedDict):
     generated_queries: List[Query]
     searched_queries: Annotated[List[Query], operator.add]
     search_results: Annotated[List[SearchResults], operator.add]
+    search_results_pubtator: Annotated[List[SearchResults], operator.add]
     accumulated_content: str
     reflection_count: int
     final_section_content: List[str]

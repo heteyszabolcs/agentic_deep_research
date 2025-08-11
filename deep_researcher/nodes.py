@@ -9,10 +9,14 @@ from langchain_core.messages import HumanMessage
 from langgraph.types import Command, Send
 from typing import Literal, Dict
 from tavily import TavilyClient
-from .state import AgentState, ResearchState
-from .configuration import Configuration
-from .utils import init_llm
-from .prompts import (
+
+import asyncio
+
+from deep_researcher.state import AgentState, ResearchState
+from deep_researcher.configuration import Configuration
+from deep_researcher.utils import init_llm
+from deep_researcher.utils import PubtatorAPIWrapper
+from deep_researcher.prompts import (
     REPORT_STRUCTURE_PLANNER_SYSTEM_PROMPT_TEMPLATE,
     SECTION_FORMATTER_SYSTEM_PROMPT_TEMPLATE,
     SECTION_KNOWLEDGE_SYSTEM_PROMPT_TEMPLATE,
@@ -22,7 +26,7 @@ from .prompts import (
     FINAL_SECTION_FORMATTER_SYSTEM_PROMPT_TEMPLATE,
     FINALIZER_SYSTEM_PROMPT_TEMPLATE
 )
-from .struct import (
+from deep_researcher.struct import (
     Sections,
     Queries,
     SearchResult,
@@ -307,6 +311,30 @@ def tavily_search_node(state: ResearchState, config: RunnableConfig):
 
     return {"search_results": search_results}
 
+def pubtator_search_node(state: ResearchState, config: RunnableConfig):
+    configurable = Configuration.from_runnable_config(config)
+
+    async def run_pubtator():
+        return await pubtator_search_async(
+            queries=state["generated_queries"],
+            top_k_results=configurable.search_depth,
+            email=getattr(configurable, "pubtator_email", None),
+            api_key=getattr(configurable, "pubtator_api_key", None),
+            type_of=None
+        )
+
+    pubtator_results = asyncio.run(run_pubtator())
+
+    # Merge Tavily + PubTator
+    tavily_results = state.get("search_results", [])
+    merged_results = []
+    for tav, pub in zip(tavily_results, pubtator_results):
+        merged_results.append(SearchResults(
+            query=tav.query,
+            results=(tav.results or []) + (pub.results or [])
+        ))
+
+    return {"search_results": merged_results}
 
 def result_accumulator_node(state: ResearchState, config: RunnableConfig):
     """
