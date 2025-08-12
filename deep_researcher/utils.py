@@ -1,24 +1,28 @@
-from typing import Literal
-
-from langchain_core.prompts import ChatPromptTemplate
-from langchain_openai import ChatOpenAI
 from langchain_anthropic import ChatAnthropic
-from langchain_core.prompts import ChatPromptTemplate
 from langchain_openai import AzureChatOpenAI
 from langchain_google_genai import ChatGoogleGenerativeAI
-from langchain_core.output_parsers import StrOutputParser
 from langchain_ollama import ChatOllama
 import os
 from pydantic import BaseModel
-from typing import List, Any
+from typing import List, Any, Optional, Literal
+import asyncio
+import urllib.error
+import urllib.parse
+import urllib.request
+import json
+import time
 from dotenv import load_dotenv
+from deep_researcher.struct import (
+    SearchResult,
+    SearchResults)
 
 load_dotenv()
+
 
 def init_llm(
         provider: Literal["openai", "anthropic", "google", "ollama"],
         model: str,
-        temperature: float = 1,
+        temperature: float = 1
 ):
     """
     Initialize and return a language model chat interface based on the specified provider.
@@ -53,7 +57,7 @@ def init_llm(
     elif provider == "anthropic":
         if "ANTHROPIC_API_KEY" not in os.environ:
             raise ValueError("ANTHROPIC_API_KEY is not set. Please set it in your environment variables.")
-        return ChatAnthropic(model=model, temperature=temperature, api_key=<os.environ["ANTHROPIC_API_KEY"]>)
+        return ChatAnthropic(model=model, temperature=temperature, api_key=os.environ["ANTHROPIC_API_KEY"])
     elif provider == "google":
         if "GOOGLE_API_KEY" not in os.environ:
             raise ValueError("GOOGLE_API_KEY is not set. Please set it in your environment variables.")
@@ -61,6 +65,8 @@ def init_llm(
     elif provider == "ollama":
         return ChatOllama(model=model, temperature=temperature)
 
+
+# noinspection PyBroadException
 class PubtatorAPIWrapper(BaseModel):
     """
     Wrapper around PubMed+Pubtator API.
@@ -186,7 +192,7 @@ class PubtatorAPIWrapper(BaseModel):
                                 size_of: int | Any = int(size_of_tuple[-1]) + 1
                             else:
                                 size_of: int = 1
-                        except Exception as e:
+                        except Exception:
                             size_of = 1
                         hashed = ''.join(["#" for _ in range(int(size_of))])
                         content.append(f'{hashed} {q["text"]}')
@@ -241,9 +247,9 @@ async def pubtator_search_async(
             )
 
             if type_of == 'id_search':
-                docs = wrapper.retrieve_article(uids=query_obj.query)
+                docs = await asyncio.to_thread(wrapper.retrieve_article, query_obj.query)
             else:
-                docs = wrapper.lazy_load(query_obj.query)
+                docs = await asyncio.to_thread(wrapper.lazy_load, query_obj.query)
 
             results_structured = []
             for doc in docs:

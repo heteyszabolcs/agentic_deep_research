@@ -15,7 +15,7 @@ import asyncio
 from deep_researcher.state import AgentState, ResearchState
 from deep_researcher.configuration import Configuration
 from deep_researcher.utils import init_llm
-from deep_researcher.utils import PubtatorAPIWrapper
+from deep_researcher.utils import PubtatorAPIWrapper, pubtator_search_async
 from deep_researcher.prompts import (
     REPORT_STRUCTURE_PLANNER_SYSTEM_PROMPT_TEMPLATE,
     SECTION_FORMATTER_SYSTEM_PROMPT_TEMPLATE,
@@ -318,8 +318,8 @@ def pubtator_search_node(state: ResearchState, config: RunnableConfig):
         return await pubtator_search_async(
             queries=state["generated_queries"],
             top_k_results=configurable.search_depth,
-            email=getattr(configurable, "pubtator_email", None),
-            api_key=getattr(configurable, "pubtator_api_key", None),
+            email=None,
+            api_key=None,
             type_of=None
         )
 

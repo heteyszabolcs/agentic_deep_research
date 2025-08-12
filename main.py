@@ -6,8 +6,8 @@ import os
 def main():
     # TOPIC = "Human Psychology"
     # OUTLINE = "To understand human behaviour about why they always take actions that are selfish and in their best interest, leaving the rest of the world to suffer, including the ones who had supported and loved them all along."
-    TOPIC = "LLM Benchmarking"
-    OUTLINE = "Since there are so many LLMs out there, I want to understand how they compare to each other in terms of their capabilities, performance, and effectiveness. I have seen so many benchmark scores, but I want to understand the most important ones, what they measure, and what they mean."
+    TOPIC = "Histone modifications"
+    OUTLINE = "I want to understand the histone modifications and how they interplay with cancer therapies"
     
     thread = {
         "configurable": {
