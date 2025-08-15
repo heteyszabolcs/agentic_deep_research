@@ -17,7 +17,6 @@ from .nodes import (
     finalizer_node
 )
 
-
 # <<< ----- RESEARCH AGENT ----- >>>
 
 research_builder = StateGraph(ResearchState, output=SectionOutput)
@@ -38,10 +37,7 @@ research_builder.add_edge("pubtator_search", "result_accumulator")
 research_builder.add_edge("result_accumulator", "reflection")
 research_builder.add_edge("final_section_formatter", END)
 
-
-
 # <<< ----- MAIN AGENT ----- >>>
-
 memory_saver = MemorySaver()
 
 builder = StateGraph(AgentState)

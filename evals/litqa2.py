@@ -2,14 +2,13 @@ from deep_researcher.graph import agent_graph
 from IPython.display import Image, display
 import uuid
 import os
+import pandas as pd
 
-def main():
-    # TOPIC = "Human Psychology"
-    # OUTLINE = "To understand human behaviour about why they always take actions that are selfish and in their best interest, leaving the rest of the world to suffer, including the ones who had supported and loved them all along."
-    TOPIC = "Acinetobacter lwoffii has been evolved in the lab to be resistant to which of these antibiotics?"
-    OUTLINE = f"I want to find the answer to the question: {TOPIC}"
-    
-    thread = {
+litqa2 = pd.read_csv("evals/litqa2.tsv", sep="\t")
+litqa2 = litqa2[litqa2['is_opensource'] == True]
+questions = litqa2["question"][0:3].to_list()
+
+thread = {
         "configurable": {
             "thread_id": str(uuid.uuid4()),
             "max_queries": 3,
@@ -19,12 +18,13 @@ def main():
         }
     }
 
-    os.makedirs("logs", exist_ok=True)
-    os.makedirs("reports", exist_ok=True)
+os.makedirs("logs", exist_ok=True)
+os.makedirs("reports", exist_ok=True)
 
+for question in questions:
     for event in agent_graph.stream(
-        {"topic": TOPIC, "outline": OUTLINE},
-        config=thread,
+            {"topic": "Molecular Biology", "outline": question},
+            config=thread,
     ):
         with open("logs/agent_logs.txt", "a", encoding="utf-8") as f:
             f.write(str(event))
@@ -33,7 +33,7 @@ def main():
         if "report_structure_planner" in event:
             print("<<< REPORT STRUCTURE PLANNER >>>")
             print(event["report_structure_planner"]["messages"][-1].content)
-            print("\n", "="*100, "\n")
+            print("\n", "=" * 100, "\n")
         elif "section_formatter" in event:
             pass
         elif "research_agent" in event:
@@ -41,7 +41,7 @@ def main():
         elif "human_feedback" in event:
             print("<<< HUMAN FEEDBACK >>>")
             print(event["human_feedback"]["messages"][-1].content)
-            print("\n", "="*100, "\n")
+            print("\n", "=" * 100, "\n")
         elif "queue_next_section" in event:
             pass
         elif "finalizer" in event:
@@ -49,8 +49,7 @@ def main():
         else:
             print("<<< UNKNOWN EVENT >>>")
             print(event)
-            print("\n", "="*100, "\n")
-    
+            print("\n", "=" * 100, "\n")
 
-if __name__ == "__main__":
-    main()
+
+

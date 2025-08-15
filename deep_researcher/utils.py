@@ -2,6 +2,7 @@ from langchain_anthropic import ChatAnthropic
 from langchain_openai import AzureChatOpenAI
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_ollama import ChatOllama
+import re
 import os
 from pydantic import BaseModel
 from typing import List, Any, Optional, Literal
@@ -282,3 +283,11 @@ async def pubtator_search_async(
         delay = max(0.5, delay * 0.9) if res.results else min(5.0, delay * 1.5)
 
     return search_results
+
+def slugify(text):
+    '''
+    :param text:
+    :return: slugified version of the input text
+    '''
+    return re.sub(r'\W+', '-', text.lower()).strip('-')
+

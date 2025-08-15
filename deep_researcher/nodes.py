@@ -14,7 +14,7 @@ import asyncio
 
 from deep_researcher.state import AgentState, ResearchState
 from deep_researcher.configuration import Configuration
-from deep_researcher.utils import init_llm
+from deep_researcher.utils import init_llm, slugify
 from deep_researcher.utils import PubtatorAPIWrapper, pubtator_search_async
 from deep_researcher.prompts import (
     REPORT_STRUCTURE_PLANNER_SYSTEM_PROMPT_TEMPLATE,
@@ -36,6 +36,10 @@ from deep_researcher.struct import (
 )
 import time
 import os
+import glob
+import shutil
+
+# noinspection PyTypeChecker
 
 
 def report_structure_planner_node(state: AgentState, config: RunnableConfig) -> Dict:
@@ -92,7 +96,7 @@ def human_feedback_node(
     report_structure = state.get("messages")[-1].content
 
     if configurable.human_feedback == "auto-approved":
-    # Skip human feedback loop
+        # Skip human feedback loop
         return Command(
             goto="section_formatter",
             update={
@@ -113,6 +117,7 @@ def human_feedback_node(
             goto="report_structure_planner",
             update={"messages": [HumanMessage(content=human_message)]}
         )
+
 
 def section_formatter_node(state: AgentState, config: RunnableConfig) -> Command[Literal["queue_next_section"]]:
     """
@@ -311,6 +316,7 @@ def tavily_search_node(state: ResearchState, config: RunnableConfig):
 
     return {"search_results": search_results}
 
+
 def pubtator_search_node(state: ResearchState, config: RunnableConfig):
     configurable = Configuration.from_runnable_config(config)
 
@@ -336,24 +342,54 @@ def pubtator_search_node(state: ResearchState, config: RunnableConfig):
 
     return {"search_results": merged_results}
 
+
 def result_accumulator_node(state: ResearchState, config: RunnableConfig):
     """
     Accumulates and synthesizes search results into coherent content.
 
     This node takes the search results from the previous node and uses an LLM to process
-    and combine them into a unified, coherent piece of content. The LLM analyzes the 
+    and combine them into a unified, coherent piece of content. The LLM analyzes the
     search results and extracts relevant information to build knowledge about the section topic.
 
-    Args:
-        state (ResearchState): The current research state containing search results
-            and other research context
-        config (RunnableConfig): Configuration object containing LLM settings and other parameters
-
-    Returns:
-        dict: A dictionary containing:
-            - accumulated_content (str): The synthesized content generated from processing
-              the search results
+    Includes safety limits to prevent context length exceeded errors.
     """
+    # Safety limits to prevent context overflow
+    MAX_RESULTS = 30  # Limit number of results processed
+    MAX_CHARS_PER_RESULT = 6000  # Limit content per result
+    MAX_TOTAL_INPUT_CHARS = 100000  # Overall input limit
+
+    # Extract and flatten search results
+    flat_results = []
+    for search_results_obj in state.get("search_results", []):
+        if hasattr(search_results_obj, 'results'):
+            flat_results.extend(search_results_obj.results)
+
+    # Limit and truncate results
+    limited_results = flat_results[:MAX_RESULTS]
+
+    # Prepare safe results with truncation
+    safe_results = []
+    total_chars = 0
+
+    for result in limited_results:
+        content = ""
+        if hasattr(result, "raw_content") and result.raw_content:
+            content = result.raw_content[:MAX_CHARS_PER_RESULT]
+        elif hasattr(result, "content") and result.content:
+            content = result.content[:MAX_CHARS_PER_RESULT]
+
+        # Check total character limit
+        if total_chars + len(content) > MAX_TOTAL_INPUT_CHARS:
+            break
+
+        safe_results.append({
+            "url": getattr(result, "url", ""),
+            "title": getattr(result, "title", ""),
+            "content": content
+        })
+        total_chars += len(content)
+
+    # Initialize LLM
     configurable = Configuration.from_runnable_config(config)
     llm = init_llm(
         provider=configurable.provider,
@@ -363,11 +399,17 @@ def result_accumulator_node(state: ResearchState, config: RunnableConfig):
 
     result_accumulator_system_prompt = ChatPromptTemplate.from_messages([
         SystemMessagePromptTemplate.from_template(RESULT_ACCUMULATOR_SYSTEM_PROMPT_TEMPLATE),
-        HumanMessagePromptTemplate.from_template(template="{search_results}"),
+        HumanMessagePromptTemplate.from_template(
+            template="Section: {section}\nSearch Results: {search_results}"
+        ),
     ])
     result_accumulator_llm = result_accumulator_system_prompt | llm
 
-    result = result_accumulator_llm.invoke(state)
+    # Pass only the essential data, not the entire state
+    result = result_accumulator_llm.invoke({
+        "section": state.get("section", ""),
+        "search_results": safe_results
+    })
 
     return {"accumulated_content": result.content}
 
@@ -428,18 +470,6 @@ def reflection_feedback_node(
 def final_section_formatter_node(state: ResearchState, config: RunnableConfig):
     """
     Formats the final content for a section of the research report.
-
-    This node uses an LLM to take the accumulated research content and internal knowledge
-    about the section, and format it into a cohesive, well-structured section of the report.
-    The formatted content is both saved to a log file and returned as part of the state.
-
-    Args:
-        state (ResearchState): The current research state containing the section info,
-            internal knowledge, and accumulated content to format
-        config (RunnableConfig): Configuration object containing LLM settings
-
-    Returns:
-        dict: A dictionary containing the formatted section content in the 'final_section_content' key
     """
 
     configurable = Configuration.from_runnable_config(config)
@@ -451,35 +481,34 @@ def final_section_formatter_node(state: ResearchState, config: RunnableConfig):
 
     final_section_formatter_system_prompt = ChatPromptTemplate.from_messages([
         SystemMessagePromptTemplate.from_template(FINAL_SECTION_FORMATTER_SYSTEM_PROMPT_TEMPLATE),
-        HumanMessagePromptTemplate.from_template(template="Internal Knowledge: {knowledge}\nSearch Result content: {accumulated_content}"),
+        HumanMessagePromptTemplate.from_template(
+            template="Internal Knowledge: {knowledge}\nSearch Result content: {accumulated_content}"
+        ),
     ])
     final_section_formatter_llm = final_section_formatter_system_prompt | llm
 
     result = final_section_formatter_llm.invoke(state)
 
-    os.makedirs("logs/section_content", exist_ok=True)
+    # Check log directory
+    os.makedirs("logs/section_content/", exist_ok=True)
 
-    with open(f"logs/section_content/{state['current_section_index']+1}. {state['section'].section_name}.md", "a", encoding="utf-8") as f:
-        f.write(f"{result.content}")
+    # Slugify section name
+    raw_section_name = state['section'].section_name
+    safe_section_name = slugify(raw_section_name)
+
+    filename = f"{state['current_section_index'] + 1}. {safe_section_name}.md"
+    filepath = os.path.join("logs", "section_content", filename)
+
+    with open(filepath, "a", encoding="utf-8") as f:
+        f.write(result.content)
 
     return {"final_section_content": [result.content]}
 
 
 def finalizer_node(state: AgentState, config: RunnableConfig):
     """
-    Finalizes the research report by generating a conclusion, references, and combining all sections.
-
-    This node takes the accumulated section content and search results from the agent state and:
-    1. Uses an LLM to generate a conclusion and curated list of references
-    2. Combines all section content into a single markdown document
-    3. Saves the final report to a file
-    
-    Args:
-        state (AgentState): The current agent state containing all section content and search results
-        config (RunnableConfig): Configuration object containing LLM settings
-
-    Returns:
-        dict: A dictionary containing the complete report content in the 'final_report_content' key
+    Finalizes the research report by generating a conclusion, references,
+    and combining all sections.
     """
 
     configurable = Configuration.from_runnable_config(config)
@@ -492,21 +521,49 @@ def finalizer_node(state: AgentState, config: RunnableConfig):
     extracted_search_results = []
     for search_results in state['search_results']:
         for search_result in search_results.results:
-            extracted_search_results.append({"url": search_result.url, "title": search_result.title})
+            extracted_search_results.append({
+                "url": search_result.url,
+                "title": search_result.title
+            })
 
     finalizer_system_prompt = ChatPromptTemplate.from_messages([
         SystemMessagePromptTemplate.from_template(FINALIZER_SYSTEM_PROMPT_TEMPLATE),
-        HumanMessagePromptTemplate.from_template(template="Section Contents: {final_section_content}\n\nSearches: {extracted_search_results}"),
+        HumanMessagePromptTemplate.from_template(
+            template="Section Contents: {final_section_content}\n\nSearches: {extracted_search_results}"
+        ),
     ])
     finalizer_llm = finalizer_system_prompt | llm.with_structured_output(ConclusionAndReferences)
 
-    result = finalizer_llm.invoke({**state, "extracted_search_results": extracted_search_results})
+    result = finalizer_llm.invoke({
+        **state,
+        "extracted_search_results": extracted_search_results
+    })
 
     final_report = "\n\n".join([section_content for section_content in state["final_section_content"]])
     final_report += "\n\n" + result.conclusion
-    final_report += "\n\n# References\n\n" + "\n".join(["- "+reference for reference in result.references])
-    
-    with open(f"reports/{state['topic']}.md", "w", encoding="utf-8") as f:
+    final_report += "\n\n# References\n\n" + "\n".join(
+        ["- " + reference for reference in result.references]
+    )
+
+    # Slugify and trim topic for filename
+    raw_topic = state['topic']
+    short_slug = slugify(raw_topic)[:50]
+    filename = f"{short_slug}.md"
+
+    # Ensure reports directory exists
+    os.makedirs(f"reports/{short_slug}", exist_ok=True)
+
+    with open(os.path.join(f"reports/{short_slug}", filename), "w", encoding="utf-8") as f:
         f.write(final_report)
+
+    # Move section markdown files
+    log_folder = f"logs/section_content/{short_slug}"
+    os.makedirs(log_folder, exist_ok=True)
+    md_files = glob.glob(os.path.join("logs/section_content/", "*.md"))
+    for md_file in md_files:
+        md_filename = os.path.basename(md_file)
+        target_path = os.path.join(log_folder, md_filename)
+        shutil.move(md_file, target_path)
+        print(f"Moved: {md_filename} -> {log_folder}")
 
     return {"final_report_content": final_report}
